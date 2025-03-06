@@ -63,18 +63,31 @@ static double z=500.0;
 //摄像机位置(A)
 static Vector3 camera(0.0,0.0,0.0);
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+enum MaterialType
+{
+    MATTE,       // 哑光
+    METAL,       // 金属
+    GLASS,       // 玻璃
+    FABRIC,      // 布料
+    POLISHED     // 抛光
+};
+/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //Sphere类的创建
 class Sphere
 {
 public:
     Vector3 center;
     double radius;
-    Vector3 color; // 球体颜色
+    Vector3 color;          // 球体颜色
+    MaterialType materialType;  // 材质类型
+    bool hasTexture;        // 是否有纹理
+    Vector3 textureColor;   // 纹理颜色（条纹颜色）
 
-    Sphere() : center(), radius(0.0), color(0, 0, 0) {} // 构造函数，防垃圾值
+    Sphere() : center(), radius(0.0), color(0, 0, 0), materialType(MATTE), hasTexture(false), textureColor(0, 0, 0) {}
 
-    Sphere(Vector3 newCenter, double newRadius, Vector3 newColor) :
-        center(newCenter), radius(newRadius), color(newColor) {} // 赋值构造函数
+    Sphere(Vector3 newCenter, double newRadius, Vector3 newColor, MaterialType newMaterialType = MATTE, bool newHasTexture = false, Vector3 newTextureColor = Vector3(0, 0, 0)) :
+        center(newCenter), radius(newRadius), color(newColor), materialType(newMaterialType), hasTexture(newHasTexture), textureColor(newTextureColor) {}
+
 };
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 //light（光源）类的建立
@@ -87,23 +100,118 @@ struct Light {
 //引入冯氏光照模型 phong(返回计算出的物体表面光照效果颜色)
 Vector3 calculatePhongLighting(const Vector3& hitPoint, const Vector3& normal, const Light& light, const Vector3& camera, const Sphere& sphere)
 {
-    Vector3 mixcol;
-    mixcol.x=light.color.x * sphere.color.x;
-    mixcol.y=light.color.y * sphere.color.y;
-    mixcol.z=light.color.z * sphere.color.z;
 
-    Vector3 ambient = mixcol * 0.15; // 环境光（0.1是环境光系数）
+    Vector3 mixcol = sphere.color;
+
+    // 条纹纹理
+   if (sphere.hasTexture && sphere.materialType != FABRIC)
+    {
+        double stripe = std::fmod(hitPoint.y,30); // 假设条纹周期为20
+        if (stripe < 15)
+        { // 一半区域为纹理颜色
+            mixcol = sphere.textureColor;
+        }
+        else
+        {
+            mixcol = sphere.color; // 另一半区域为球体颜色
+        }
+    }
+
+    // 方格条纹（仅用于地面球）
+    // 棋盘格实现
+  if (sphere.materialType == FABRIC)
+    {
+        const double gridSize = 40.0; // 每个格子实际尺寸
+        // 去掉偏移直接取模
+        double gridX = std::fmod(hitPoint.x, gridSize);
+        double gridZ = std::fmod(hitPoint.z, gridSize);
+
+        // 判断是否在格子前半部分
+        bool xPart = (gridX < gridSize / 2);
+        bool zPart = (gridZ < gridSize / 2);
+
+        // XOR操作：相同区域为一种颜色，不同为另一种
+        bool isPattern = (xPart == zPart);
+
+        mixcol = isPattern ?
+                     Vector3(0.95,0.85,0.75) :  // 米白色
+                     Vector3(0.3,0.2,0.1);      // 深棕色
+        // // 使用坐标偏移确保对齐
+        // double gridX = std::fmod(hitPoint.x + gridSize/2, gridSize);
+        // double gridZ = std::fmod(hitPoint.z + gridSize/2, gridSize);
+
+        // // // 判断当前在哪个子格子中
+        // // bool isWhite = ((int)(gridX / (gridSize/2))+ static_cast<int>(gridZ / (gridSize/2))) % 2 == 0;
+
+        // // mixcol = isWhite ? Vector3(0.9, 0.9, 0.9) : Vector3(0.4, 0.4, 0.4);
+
+        // // 判断当前在哪个子格子中
+        // int row = (int)(gridZ / gridSize); // 将Z轴划分为行
+        // int col = (int)(gridX / gridSize); // 将X轴划分为列
+
+        // // 根据行列号判断颜色
+        // bool isWhite = (row + col) % 2 == 0;
+
+        // mixcol = isWhite ? Vector3(0.9, 0.9, 0.9) : Vector3(0.4, 0.4, 0.4);
+    }
+
+    // if (sphere.materialType == FABRIC)
+    // {
+    //     double gridSize = 30.0;
+    //     // 使用绝对坐标而非相对球心的坐标
+    //     double gridX = std::fmod(std::abs(hitPoint.x), gridSize);
+    //     double gridZ = std::fmod(std::abs(hitPoint.z), gridSize);
+
+    //     // 经典棋盘格判断：当行列同为偶数或奇数时显示颜色A
+    //     if ((static_cast<int>(gridX/(gridSize/2)) +
+    //          static_cast<int>(gridZ/(gridSize/2))) % 2 == 0)
+    //     {
+    //         mixcol = Vector3(0.9, 0.9, 0.9); // 白色
+    //     }
+    //     else
+    //     {
+    //         mixcol = Vector3(0.4, 0.4, 0.4); // 灰色
+    //     }
+
+    // }
+
+    // 环境光
+    Vector3 ambient = mixcol * 0.4;
 
     // 漫反射
-    Vector3 lightDir = Vector3::unitization(light.position - hitPoint);
-    double diff = std::max(normal * lightDir, 0.0);//漫反射系数
-    Vector3 diffuse =mixcol * diff;
+   Vector3 lightDir = Vector3::unitization(light.position - hitPoint);
+    double diff = std::max(normal * lightDir, 0.0);
+    Vector3 diffuse = mixcol * diff*1.2;
 
     // 镜面反射
     Vector3 viewDir = Vector3::unitization(camera - hitPoint);
     Vector3 reflectDir = Vector3::unitization(normal * 2.0 * (normal * lightDir) - lightDir);
-    double spec = std::pow(std::max(viewDir * reflectDir, 0.0), 32);//32是镜面高光指数   spec是镜面发射因子
-    Vector3 specular = light.color * 0.5 * spec; //0.5镜面反射系数 （颜色）
+    double spec = std::pow(std::max(viewDir * reflectDir, 0.0), 32);
+    Vector3 specular = light.color * spec;
+
+    // 根据材质类型调整光照效果
+    switch (sphere.materialType)
+    {
+    case MATTE:  // 哑光：高漫反射，低镜面反射
+        specular = specular*0.1;  // 减弱镜面反射
+        break;
+    case METAL:  // 金属：低漫反射，高镜面反射
+        diffuse =diffuse * 0.2;   // 减弱漫反射
+        specular = specular *3.0;  // 增强镜面反射
+        break;
+    case GLASS:  // 玻璃：透明，有折射
+        diffuse = diffuse *0.5;   // 减弱漫反射
+        specular = specular *1.5;  // 增强镜面反射
+        break;
+    case FABRIC: // 布料：高漫反射，低镜面反射，柔和颜色
+        diffuse = diffuse * 2/3;      // 增强漫反射
+        specular = specular * 0.02;    // 几乎无高光
+        ambient = mixcol * 0.15;        // 提高环境光
+        break;
+    case POLISHED: // 抛光：中等漫反射，高镜面反射
+        specular = specular *1.2;  // 增强镜面反射
+        break;
+    }
 
     // 合并颜色并限制范围
     Vector3 result = ambient + diffuse + specular;
@@ -111,7 +219,6 @@ Vector3 calculatePhongLighting(const Vector3& hitPoint, const Vector3& normal, c
     result.y = std::clamp(result.y, 0.0, 1.0);
     result.z = std::clamp(result.z, 0.0, 1.0);
 
-    // 映射到 0-255
     return result * 255.0;
 }
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -137,6 +244,30 @@ public:
     // }
 };
 /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+//光线撞击相关函数
+
+//是否撞击的判断
+static bool if_Hit(Vector3 center, double radius, Ray ray)
+{
+     ray.B = Vector3::unitization(ray.B);
+
+    double a = ray.B * ray.B;
+    double b = 2.0 * (ray.B * (ray.A-center));
+    double c = (ray.A-center) *(ray.A- center) - radius * radius;
+
+    double delta = b * b - 4 * a * c;
+
+    float x1=(-b+sqrt(delta))/(2*a);
+    float x2=(-b-sqrt(delta))/(2*a);
+
+    float t=(x1<x2?x1:x2);
+    if(t<=0&&(x1>x2?x1:x2)>0)
+    {
+        t=(x1>x2?x1:x2);
+    }
+
+    return (delta >= 0)&&(t>0);
+}
 // 平面地面的光照计算
 Vector3 calculateGroundLighting(double y, const Light &light)
 {
@@ -163,32 +294,9 @@ Vector3 calculateGroundLighting(double y, const Light &light)
 
     return result * 255.0;
 }
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-//光线撞击相关函数
-//是否撞击的判断
-static bool if_Hit(Vector3 center, double radius, Ray ray)
-{
-    double a = ray.B * ray.B;
-    double b = 2.0 * (ray.B * (ray.A-center));
-    double c = (ray.A-center) *(ray.A- center) - radius * radius;
-
-    double delta = b * b - 4 * a * c;
-
-    float x1=(-b+sqrt(delta))/(2*a);
-    float x2=(-b-sqrt(delta))/(2*a);
-
-    float t=(x1<x2?x1:x2);
-    if(t<=0&&(x1>x2?x1:x2)>0)
-    {
-        t=(x1>x2?x1:x2);
-    }
-
-    return (delta >= 0)&&(t>0);
-}
 //求解撞击法向量，并线性变换得到rgb编码(但是我就不判断撞不撞击了，使用时需要在前面加一个if（bool if_Hit）判断)
 static Vector3 where_Hit(Vector3 center, double radius, Ray ray)
 {
-    ray.B=Vector3:: unitization(ray.B);
 
     float a = ray.B * ray.B;
     float b = 2.0 * (ray.B * (ray.A-center));
@@ -208,7 +316,7 @@ static Vector3 where_Hit(Vector3 center, double radius, Ray ray)
 
     if(t>=0)
     {
-        Vector3 Lawline=ray.A+ray.B*t-center;
+        // Vector3 Lawline=ray.A+ray.B*t-center;
 
         //引入phong应该不需要rgb转化了，这是之前为了便于验证的代码
 
@@ -217,12 +325,11 @@ static Vector3 where_Hit(Vector3 center, double radius, Ray ray)
         // Lawline = (Lawline + Vector3(1, 1, 1)) / 2;
         // Lawline = Lawline * 255;//向0~255作线性映射(为了颜色好看，改了一下，可能以后变数据会出问题，注意一下)
 
-        return Lawline;
+        return ray.A + ray.B * t;
     }
     else
     {
-        Vector3 black=Vector3(0,0,0);
-        return black;
+        return Vector3(-1, -1, -1); // 没有有效交点
 
 
         // Vector3 Lawline=ray.A+ray.B*t-center;
@@ -236,12 +343,13 @@ static Vector3 where_Hit(Vector3 center, double radius, Ray ray)
     }
 
 }
-//多重取样 抗锯齿（采用phong后）【对于地面球】
-Vector3 multisample(double x, double y, const Sphere& sphere, const Light& light) {
+// 多重取样 抗锯齿（采用phong后）【对于地面球】
+Vector3 multisample(double x, double y, const Sphere& sphere, const Light& light)
+{
     const int sample = 2; // 采样数量
     Vector3 sample_color[sample * sample];
     int n = 0;
-    int count=0;
+    int count = 0;
 
     for (int i = 0; i < sample; i++)
     {
@@ -255,30 +363,34 @@ Vector3 multisample(double x, double y, const Sphere& sphere, const Light& light
             if (if_Hit(sphere.center, sphere.radius, ray))
             {
                 Vector3 hitPoint = where_Hit(sphere.center, sphere.radius, ray);
-                Vector3 normal = Vector3::unitization(hitPoint - sphere.center);
-                sample_color[n++] = calculatePhongLighting(hitPoint, normal, light, camera, sphere);
+                if (hitPoint.x != -1)
+                {
+                    Vector3 normal = Vector3::unitization(hitPoint - sphere.center);
+                    sample_color[n++] = calculatePhongLighting(hitPoint, normal, light, camera, sphere);
+                }
             }
             else
             {
-                    count++;
-                    sample_color[n++] = Vector3(135 + 120 * y / 301, 206 + 50 * y / 301, 255); // 背景颜色
-
+                Vector3 fakeHitPoint = Vector3(newx, y, z); // 假设的一个点，用于计算地面球纹理
+                Vector3 normal = Vector3(0, 1, 0); // 地面球的法线假设为向上
+                sample_color[n++] = calculatePhongLighting(fakeHitPoint, normal, light, camera, sphere);
+                count++;
+               // count++;
+               //  sample_color[n++] = Vector3(135 + 120 * y / 301, 206 + 50 * y / 301, 255); //背景颜色
             }
-
         }
     }
 
-
-
-    if(count==sample*sample)
+    if (count == sample * sample)
     {
-        return Vector3(-1,-1,-1);
+        return Vector3(-1, -1, -1);
     }
     else
     {
         Vector3 average_color = sample_color[0];
 
-        for (int i = 1; i < sample * sample; i++) {
+        for (int i = 1; i < sample * sample; i++)
+        {
             average_color = average_color + sample_color[i];
         }
         average_color = average_color / (sample * sample);
@@ -287,69 +399,19 @@ Vector3 multisample(double x, double y, const Sphere& sphere, const Light& light
         average_color.x = std::clamp(average_color.x, 0.0, 255.0);
         average_color.y = std::clamp(average_color.y, 0.0, 255.0);
         average_color.z = std::clamp(average_color.z, 0.0, 255.0);
+
         return average_color;
     }
-
-// static Vector3 multisample(double x,double y,Sphere R)
-// {
-//     const int sample=2;
-//     Vector3 sample_point[sample*sample];
-//     int n=0;
-//     for(int i=0;i<sample;i++)
-//     {
-//         for(int j=0;j<sample;j++)
-//         {
-//             // float newx=x-0.5+i;
-//             // float newy=y-0.5+j;
-
-//             float newx = x - 0.5 + (i + 0.5) / sample;
-//             float newy = y - 0.5 + (j + 0.5) / sample;
-
-
-//             // float newx=x-0.5+4/sample/sample*i;
-//             // float newy=y-0.5+4/sample/sample*j;
-
-//             Ray Hit_R(camera, Vector3(newx, newy, z),0);//0是随意赋的值，无实义
-
-//             bool flag=if_Hit(R.center,R.radius,Hit_R);
-
-//             if(flag)
-//             {
-//                 sample_point[n]=where_Hit(R.center,R.radius,Hit_R);
-//                 n++;
-//             }
-//             else
-
-//             {
-//                 double px=(x-camera.x+800/2);
-//                 double py=(y-camera.y+600/2);
-//                 sample_point[n]=Vector3(135+120*py/601,206+50*py/601,255);
-//                 n++;
-//             }//对2*2个样本点实现了采集
-//         }
-//     }//对2*2个样本点实现了采集
-//     Vector3 average=sample_point[0];
-//     for(int i=1;i<sample*sample;i++)
-//     {
-//         average=average+sample_point[i];
-//     }
-//     average=average/sample/sample;
-
-//     //ai搜到的，防止越界的函数
-//     average.x = std::clamp((float)average.x, 0.0f, 255.0f);
-//     average.y = std::clamp((float)average.y, 0.0f, 255.0f);
-//     average.z = std::clamp((float)average.z, 0.0f, 255.0f);
-
-//     return average;
-// }
 }
-//多重取样 抗锯齿（采用phong后）【对于地上球】
-Vector3 multisample2(double x, double y, const Sphere& sphere, const Light& light,const Sphere& groundsphere) {
+
+// 多重取样 抗锯齿（采用phong后）【对于地上球】
+Vector3 multisample2(double x, double y, const Sphere& sphere, const Light& light, const Sphere& groundsphere)
+{
     const int sample = 2; // 采样数量
     Vector3 sample_color[sample * sample];
     int n = 0;
-    int count1=0;
-    int count2=0;
+    int count1 = 0;
+    int count2 = 0;
 
     for (int i = 0; i < sample; i++)
     {
@@ -363,39 +425,41 @@ Vector3 multisample2(double x, double y, const Sphere& sphere, const Light& ligh
             if (if_Hit(sphere.center, sphere.radius, ray))
             {
                 Vector3 hitPoint = where_Hit(sphere.center, sphere.radius, ray);
-                Vector3 normal = Vector3::unitization(hitPoint - sphere.center);
-                sample_color[n++] = calculatePhongLighting(hitPoint, normal, light, camera, sphere);
-            }
-            else
-            {
-                if(if_Hit(groundsphere.center, groundsphere.radius, ray))
+                if (hitPoint.x != -1)
                 {
-                    count1++;
-                    Vector3 hitPoint = where_Hit(groundsphere.center, groundsphere.radius, ray);
+                    Vector3 normal = Vector3::unitization(hitPoint - sphere.center);
+                    sample_color[n++] = calculatePhongLighting(hitPoint, normal, light, camera, sphere);
+                }
+            }
+            else if (if_Hit(groundsphere.center, groundsphere.radius, ray))
+            {
+                 count1++;
+                Vector3 hitPoint = where_Hit(groundsphere.center, groundsphere.radius, ray);
+                if (hitPoint.x != -1)
+                {
                     Vector3 normal = Vector3::unitization(hitPoint - groundsphere.center);
                     sample_color[n++] = calculatePhongLighting(hitPoint, normal, light, camera, groundsphere);
                 }
-
-                else
-                {
-                    count2++;
-                    sample_color[n++] = Vector3(135 + 120 * y / 301, 206 + 50 * y / 301, 255); // 背景颜色
-                }
             }
-
+            else
+            {
+                count2++;
+                sample_color[n++] = Vector3(135 + 120 * y / 301, 206 + 50 * y / 301, 255); // 背景颜色
+            }
         }
     }
 
 
-    if(count1==sample*sample||count2==sample*sample)
+    if (count1 == sample * sample || count2 == sample * sample)
     {
-        return Vector3(-1,-1,-1);
+        return Vector3(-1, -1, -1);
     }
     else
     {
         Vector3 average_color = sample_color[0];
 
-        for (int i = 1; i < sample * sample; i++) {
+        for (int i = 1; i < sample * sample; i++)
+        {
             average_color = average_color + sample_color[i];
         }
         average_color = average_color / (sample * sample);
@@ -433,12 +497,19 @@ protected:
 
 
         Light light;
-        light.position = Vector3(0,-300, 600);
-        light.color = Vector3(255.0 / 255.0, 200.0 / 255.0, 100.0 / 255.0); // 暖色调光源
-        light.intensity=500.0;
+        light.position = Vector3(-300,-300,800);
+        light.color = Vector3(1,1,1); // 白色光源
+        light.intensity=1.0;
 
-        // 建立地面球R0（
-        Sphere R0(Vector3(0, 1800, z), 1800.0, Vector3(100.0/255.0, 100.0/255.0, 100.0/255.0));
+        // 建立地面球R0
+        Sphere R0(
+            Vector3(0, 1800, z),
+            1800.0,
+            Vector3(0.95,0.85,0.75),  // 基础灰色
+           FABRIC,             // 布料材质
+            true,
+           Vector3(0.3,0.2,0.1)   // 纹理白色
+            );
 
         for (int y = 0; y < image.height(); ++y)
         {
@@ -449,7 +520,8 @@ protected:
                 double true_y = (double)camera.y - (double)(image.height() - 1)/2.0 + (double)y;
 
                 Vector3 color0 = multisample(true_x, true_y, R0, light);
-                if(color0.x != -1 && color0.y != -1 && color0.z != -1)
+
+                if(color0.x != -1 )
                 {
                     image.setPixel(x, y, QColor(color0.x, color0.y, color0.z).rgb());
                 }
@@ -468,15 +540,22 @@ protected:
 
 
         //建立球R1
-        Sphere R1(Vector3(0, 0, z), 50.0, Vector3(0.0/255.0, 255.0/255.0, 0.0/255.0)); // 绿色球
+        // 绿色金属球（修改处）
+        Sphere R1(
+            Vector3(0, 0, z),
+            50.0,
+            Vector3(0.0, 1.0, 0.0),  // 纯绿色（RGB: 0,255,0）
+            METAL,                   // 金属材质
+            false                    // 关闭纹理（关键修改）
+            );
 
         for (int y = 0; y <image.height() ; y++)
         {
             for (int x =0 ; x <image.width() ; x++)
             {
                 //世界坐标系转化
-                double true_x=(double)camera.x-(double)(image.width() - 1)/2.0f+(double)x;
-                double true_y=(double)camera.y-(double)(image.height() - 1)/2.0f+(double)y;
+                double true_x=(double)camera.x-(double)(image.width() - 1)/2.0+(double)x;
+                double true_y=(double)camera.y-(double)(image.height() - 1)/2.0+(double)y;
 
                 // Ray Hit_R1(camera,Vector3(true_x,true_y,z),0);//0是随意赋的值，无实义
                 // bool flag=if_Hit(R1.center,R1.radius,Hit_R1);
@@ -487,7 +566,7 @@ protected:
                 //     QColor color2(point.x,point.y,point.z);
 
                 Vector3 color = multisample2(true_x, true_y, R1, light,R0);
-                if(color.x!=-1&&color.y!=-1&&color.z!=-1)
+                if(color.x!=-1)
                 {
                     image.setPixel(x, y, QColor(color.x, color.y, color.z).rgb());//渲染球体
                 }
